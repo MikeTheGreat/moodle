@@ -708,6 +708,12 @@ class assignment_base {
 
                     //if it is not an update, we don't change the last modified time etc.
                     //this will also not write into database if no submissioncomment and grade is entered.
+/*					print '<pre>';
+					print '$_POST[$col]<br/>';
+					var_dump( $_POST[$col] );
+					print '$updatedb: '. $updatedb . ' $id: ' . $id . '$submission:';
+					var_dump($submission);
+					print '</pre><hr>'; */
 
                     if ($updatedb){
                         if ($newsubmission) {
@@ -726,11 +732,154 @@ class assignment_base {
                         //add to log only if updating
                         add_to_log($this->course->id, 'assignment', 'update grades',
                                    'submissions.php?id='.$this->cm->id.'&user='.$submission->userid,
-                                   $submission->userid, $this->cm->id);
-                    }
+                                   $submission->userid, $this->cm->id); 
+                   }
 
                 }
 
+				
+/*
+				print '<pre>';
+				print '<h2>$col</h2>';
+				var_dump($col);
+				var_dump($_POST[$col]);
+				print '<h2>_POST[submissioncomment]</h2>';
+				var_dump($_POST['submissioncomment']);
+				print '<h2>_POST</h2>';
+				var_dump($_POST);
+				print '<h2>_FILES</h2>';
+				var_dump($_FILES);
+				print '</pre><hr>';
+*/
+//				print '<h2>About to upload files</h2>';
+
+				// Want the response file upload to be independent of grades/comments
+				// This way files can be uploaded, then a .CSV of the grades uploaded separately.
+                foreach ($_FILES as $id => $file_data){
+
+					// TODO: Change FILE names to automatically indexed array, as per http://www.php.net/manual/en/features.file-upload.multiple.php ?
+				
+					if( $file_data['error'] != UPLOAD_ERR_OK )
+						continue; // TODO: How to report errors?
+						
+					
+					if( ! is_uploaded_file( $file_data['tmp_name']  ) )
+					{
+						// TODO: How to signal an error?
+						continue;
+					}
+
+					// $id now looks like rf_4
+					$id = substr( $id, 3 );
+					// $id now looks like 4
+                    $id = (int)$id; //clean parameter name for user's id #
+
+                    // $this->process_outcomes($id); // ignoring outcomes b/c I only want file uploads
+
+                    if (!$submission = $this->get_submission($id, true)) {
+                        // TODO: How to signal failure to create a submission record?
+						continue;
+                    }
+                    unset($submission->data1);  // Don't need to update this.
+                    unset($submission->data2);  // Don't need to update this.
+
+                    // just do the change, for now
+                    $updatedb = true; 
+					// TODO: later we'll figure out how to update an existing file
+					//		Create stored_file from string, look for another file with
+					//		the same SHA1 hash in the filedir?
+
+                    $submission->teacher    = $USER->id;
+                    if ($updatedb) {
+                        $submission->mailed = (int)(!$mailinfo);
+                    }
+
+                    $submission->timemarked = time();
+
+					// print '<pre>';
+					// print '<h3>submission object:</h3>' ;
+					// var_dump( $submission );
+					// print '</pre><hr>';
+					// exit(0);
+
+					
+					// Create stored_file from string
+					// This is (mostly) from http://docs.moodle.org/dev/Using_the_file_API#Create_file
+					$fs = get_file_storage();
+ 
+					// Prepare file record object
+					$fileinfo = array(
+						'contextid' => $this->context->id, 	// ID of context
+						'component' => 'mod_assignment',    // usually = table name
+						'filearea' => 'response',     		// usually = table name
+						'itemid' => $submission->id,        // ID of submission TODO: or $submission->id?
+						'filepath' => '/',           		// TODO: Put elsewhere?
+						'filename' => $file_data['name'] ); 			
+					
+					$newFileInfo = $fs->get_file( $fileinfo['contextid'], 
+										 $fileinfo['component'],
+										 $fileinfo['filearea'],
+										 $fileinfo['itemid'], 
+										 $fileinfo['filepath'], 
+										 $fileinfo['filename'] );
+										
+					if( $newFileInfo == false )
+					{
+						// File does not yet exist - create file
+						$file_contents = file_get_contents($file_data['tmp_name']);
+						
+						$newFileInfo = $fs->create_file_from_string($fileinfo, $file_contents);
+
+//						print '<pre>';
+//						print '<h3>creating new file</h3>file upload: ' . $file_data['tmp_name'] ;
+//						print '<br/>contents: ' . $file_contents;
+//						print '</pre><hr>';
+					}
+//					else
+//					{
+//						// The file already exists
+//						print '<h3>Uploaded file '. $fileinfo['filename'] .'already exists!</h3>';
+//					}
+						
+
+					// print '<pre>';
+					// print '<br/>$id: ' . $id . '<br/>$submission:';
+					// var_dump($submission);
+					// print '$fileinfo: <br/>';
+					// var_dump( $fileinfo );
+					// print '$newFileInfo: <br/>';
+					// var_dump( $newFileInfo );
+					// print '</pre><hr>';
+					// continue;
+					
+					// No need to explicitly attach stored_file to submission - we'll find it when we look for any files for the submission
+					
+                    //if it is not an update, we don't change the last modified time etc.
+                    //this will also not write into database if no submissioncomment and grade is entered. TODO: Why not???
+
+                    if ($updatedb){
+/*                        if ($newsubmission) {
+                            if (!isset($submission->submissioncomment)) {
+                                $submission->submissioncomment = '';
+                            }
+                            $sid = $DB->insert_record('assignment_submissions', $submission);
+                            $submission->id = $sid;
+                        } else { */
+                            $DB->update_record('assignment_submissions', $submission);
+                        /*}*/
+
+                        // trigger grade event
+                        $this->update_grade($submission);
+
+                        //add to log only if updating
+                        add_to_log($this->course->id, 'assignment', 'update grades',
+                                   'submissions.php?id='.$this->cm->id.'&user='.$submission->userid,
+                                   $submission->userid, $this->cm->id); 
+                    }
+
+                }				
+				
+				
                 $message = $OUTPUT->notification(get_string('changessaved'), 'notifysuccess');
 
                 $this->display_submissions($message);
@@ -1080,6 +1229,101 @@ class assignment_base {
     function preprocess_submission(&$submission) {
     }
 
+		/**
+     *  Private function to generate the 'response file' box in the display_submissionS table.
+     *
+     * 		It's here because we want to do the same thing regardless of whether the student
+	 * 	has handed in any homework or not (i.e., allow for offline feedback to students who
+	 *	didn't hand anything in).
+	 *
+	 *		This was refactored rather than moved to a common point in the flow because
+	 *	of the need to increment tabindex at the right time.
+     * 
+	 * @param tabindex THIS IS BEING PASSED BY REFERENCE, so it can modify tabindex in the display_submissionS function
+     * @return string HTML to display, suitable for the $table->add_row line
+     */
+	private function get_response_file_box($final_grade, $auser, $quickgrade, &$tabindex)
+	{
+		$no_files_default = '(No file to display)';
+		// If there's been no submission then there's no response files...
+//		print '<h2>$auser->submissionid:'.$auser->submissionid.'</h2>';
+
+		if( empty($auser->submissionid))
+			return '<div id="resp'.$auser->id.'">' . $no_files_default . '</div>';
+			
+		
+		$fs = get_file_storage();
+
+		// Find previous files (if any)
+		$response_files = $fs->get_area_files( $this->context->id, 'mod_assignment','response' );
+		$response_file_names = "";
+		// print '<pre>';
+		// print '<h2>$response_files:</h2>';
+		// var_dump( $response_files );
+		// print '</pre>';
+				
+		$num_found = 0;
+		foreach( $response_files as $pathnamehash => $stored_file)
+		{
+			// print '<h2>$stored_file->get_itemid: ' . $stored_file->get_itemid() . ' $auser->submissionid: ' . $auser->submissionid .' isDirectory:'.$stored_file->is_directory().'</h2>';
+		
+			if( $stored_file->get_itemid() != $auser->submissionid 
+				|| $stored_file->is_directory()) {
+				continue;
+			}
+			
+			$response_file_names  .= $stored_file->get_filename() . '<br/>';
+			$num_found++;
+			
+			// print '<pre>';
+			// print '$response_file_names: ' . $response_file_names;
+			// print '<br/>$pathnamehash: ' . $pathnamehash . '<br/>$stored_file->get_filename():'.$stored_file->get_filename() .'<br/>$stored_file:<br/>';
+			// print '<br/></pre>';
+		}
+		
+		if( $response_file_names != "")
+			if( $num_found > 1 )
+				$response_file_names = 'Current files:<br/>' . $response_file_names;
+			else
+				$response_file_names = 'Current file:<br/>' . $response_file_names;
+		else
+			$response_file_names = $no_files_default . '<br/>';
+		
+		$filechooser = html_writer::tag('input', '', 
+			array('type'=>'file', 'name'=>'rf_'.$auser->id.'', 'id' => 'rf'.$auser->id, 'tabindex' => $tabindex++) );
+		$responsefile = '<div id="resp'.$auser->id.'">'.$response_file_names.'<br/>Add Response File:'.$filechooser.'</div>';			
+		
+		return $responsefile;
+	}
+		// if ($final_grade->locked or $final_grade->overridden) {
+			// if (empty($auser->submissionid)) {
+                            // $responsefile = '<div id="resp'.$auser->id.'">(No file to display)</div>';
+            // }
+			// else {
+				// $fs = get_file_storage();
+
+//				Find previous files (if any)
+				// $response_files = $fs->get_area_files( $this->context->id, 'mod_assignment','response' );
+				// $response_file_names = "";
+				// foreach( $response_files as $pathnamehash => $stored_file)
+				// {
+					// $response_file_names  += $stored_file->get_filename() . '<br/>';
+				// }
+				
+				// if( $response_file_names == "")
+					// $response_file_names = '(No file to display)';
+				
+				// $responsefile = '<div id="resp'.$auser->id.'">Current file:<br/>'.$response_file_names.'</div>';
+			// }
+		// } else if ($quickgrade) {
+//			'name' attribute is rf_X, where X == user's id, since
+			// $filechooser = html_writer::tag('input', '', 
+				// array('type'=>'file', 'name'=>'rf_'.$auser->id.'', 'id' => 'rf'.$auser->id, 'tabindex' => $tabindex++) );
+			// $responsefile = '<div id="resp'.$auser->id.'">'.$filechooser.'</div>';			
+		// } else {
+			// $responsefile = '<div id="resp'.$auser->id.'">(No file to display)</div>';
+		// }	
+	
     /**
      *  Display all the submissions ready for grading
      *
@@ -1108,6 +1352,7 @@ class assignment_base {
             $filter = optional_param('filter', 0, PARAM_INT);
             set_user_preference('assignment_perpage', $perpage);
             set_user_preference('assignment_quickgrade', optional_param('quickgrade', 0, PARAM_BOOL));
+			set_user_preference('assignment_quickgrade_response_files', optional_param('quickgrade_response_files', 0, PARAM_BOOL));
             set_user_preference('assignment_filter', $filter);
         }
 
@@ -1116,6 +1361,7 @@ class assignment_base {
          */
         $perpage    = get_user_preferences('assignment_perpage', 10);
         $quickgrade = get_user_preferences('assignment_quickgrade', 0);
+		$quickgrade_response_files = get_user_preferences('assignment_quickgrade_response_files', 0);
         $filter = get_user_preferences('assignment_filter', 0);
         $grading_info = grade_get_grades($this->course->id, 'mod', 'assignment', $this->assignment->id);
 
@@ -1235,7 +1481,7 @@ class assignment_base {
             }
         }
 
-        $tablecolumns = array('picture', 'fullname', 'grade', 'submissioncomment', 'timemodified', 'timemarked', 'status', 'finalgrade');
+        $tablecolumns = array('picture', 'fullname', 'grade', /* responsefile, if enabled */ 'submissioncomment', 'timemodified', 'timemarked', 'status', 'finalgrade');
         if ($uses_outcomes) {
             $tablecolumns[] = 'outcome'; // no sorting based on outcomes column
         }
@@ -1244,6 +1490,7 @@ class assignment_base {
                               get_string('fullnameuser'),
                               get_string('grade'),
                               get_string('comment', 'assignment'),
+							  /* response file header, if enabled */
                               get_string('lastmodified').' ('.get_string('submission', 'assignment').')',
                               get_string('lastmodified').' ('.get_string('grade').')',
                               get_string('status'),
@@ -1251,6 +1498,12 @@ class assignment_base {
         if ($uses_outcomes) {
             $tableheaders[] = get_string('outcome', 'grades');
         }
+		
+		if( $quickgrade && $quickgrade_response_files ) {
+			// if we want to see this column then insert the header into the array.
+			array_splice( $tableheaders, 4, 0, array ( get_string( 'responsefilecolumnheader', 'assignment') ) );
+			array_splice( $tablecolumns, 4, 0, array ( 'responsefile' ) );
+		}
 
         require_once($CFG->libdir.'/tablelib.php');
         $table = new flexible_table('mod-assignment-submissions');
@@ -1270,6 +1523,9 @@ class assignment_base {
         $table->column_class('fullname', 'fullname');
         $table->column_class('grade', 'grade');
         $table->column_class('submissioncomment', 'comment');
+		if( $quickgrade && $quickgrade_response_files ) {
+			$table->column_class('responsefile', 'responsefile'); // HACK HACK!
+		}
         $table->column_class('timemodified', 'timemodified');
         $table->column_class('timemarked', 'timemarked');
         $table->column_class('status', 'status');
@@ -1282,8 +1538,10 @@ class assignment_base {
         $table->set_attribute('id', 'attempts');
         $table->set_attribute('class', 'submissions');
         $table->set_attribute('width', '100%');
+        //$table->set_attribute('align', 'center');
 
         $table->no_sorting('finalgrade');
+		$table->no_sorting('responsefile');
         $table->no_sorting('outcome');
 
         // Start working -- this is necessary as soon as the niceties are over
@@ -1400,6 +1658,12 @@ class assignment_base {
                             } else {
                                 $comment = '<div id="com'.$auser->id.'">'.shorten_text(strip_tags($auser->submissioncomment),15).'</div>';
                             }
+						///Print Response file upload box:
+							if( $quickgrade && $quickgrade_response_files )
+								$responsefile = $this->get_response_file_box($final_grade, $auser, $quickgrade, $tabindex);
+							else
+								$responsefile = ""; // won't use it anyways
+							
                         } else {
                             $studentmodified = '<div id="ts'.$auser->id.'">&nbsp;</div>';
                             $teachermodified = '<div id="tt'.$auser->id.'">&nbsp;</div>';
@@ -1427,6 +1691,22 @@ class assignment_base {
                             } else {
                                 $comment = '<div id="com'.$auser->id.'">&nbsp;</div>';
                             }
+							
+                            if ($final_grade->locked or $final_grade->overridden) {
+                                $comment = '<div id="com'.$auser->id.'">'.$final_grade->str_feedback.'</div>';
+                            } else if ($quickgrade) {
+                                $comment = '<div id="com'.$auser->id.'">'
+                                         . '<textarea tabindex="'.$tabindex++.'" name="submissioncomment['.$auser->id.']" id="submissioncomment'
+                                         . $auser->id.'" rows="2" cols="20">'.($auser->submissioncomment).'</textarea></div>';
+                            } else {
+                                $comment = '<div id="com'.$auser->id.'">&nbsp;</div>';
+                            }
+							
+							///Print Response file upload box:
+							if( $quickgrade && $quickgrade_response_files )
+								$responsefile = $this->get_response_file_box($final_grade, $auser, $quickgrade, $tabindex);
+							else
+								$responsefile = ""; // won't use it anyways
                         }
 
                         if (empty($auser->status)) { /// Confirm we have exclusively 0 or 1
@@ -1470,6 +1750,9 @@ class assignment_base {
 
                         $userlink = '<a href="' . $CFG->wwwroot . '/user/view.php?id=' . $auser->id . '&amp;course=' . $course->id . '">' . fullname($auser, has_capability('moodle/site:viewfullnames', $this->context)) . '</a>';
                         $row = array($picture, $userlink, $grade, $comment, $studentmodified, $teachermodified, $status, $finalgrade);
+						if( $quickgrade && $quickgrade_response_files ) {
+							array_splice($row, 4, 0, array($responsefile) );
+						}
                         if ($uses_outcomes) {
                             $row[] = $outcomes;
                         }
@@ -1533,6 +1816,10 @@ class assignment_base {
         $mform->setDefault('quickgrade', $quickgrade);
         $mform->addHelpButton('quickgrade', 'quickgrade', 'assignment');
 
+        $mform->addElement('checkbox', 'quickgrade_response_files', get_string('quickgrade_response_files','assignment'));		
+		$mform->setDefault('quickgrade_response_files', $quickgrade_response_files);
+        $mform->addHelpButton('quickgrade_response_files', 'quickgrade_response_files', 'assignment');
+		
         $mform->addElement('submit', 'savepreferences', get_string('savepreferences'));
 
         $mform->display();
