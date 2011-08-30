@@ -1,5 +1,11 @@
 <?php
 
+print '<pre>';
+print '<h2>$_FILES</h2>';
+var_dump($_FILES);
+print '</pre><hr>';
+
+
 require_once("../../config.php");
 require_once("lib.php");
 require_once($CFG->libdir.'/plagiarismlib.php');

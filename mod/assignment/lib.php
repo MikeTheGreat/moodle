@@ -738,20 +738,18 @@ class assignment_base {
                 }
 
 				
-/*
 				print '<pre>';
 				print '<h2>$col</h2>';
 				var_dump($col);
 				var_dump($_POST[$col]);
-				print '<h2>_POST[submissioncomment]</h2>';
+				print '<h2>$_POST[submissioncomment]</h2>';
 				var_dump($_POST['submissioncomment']);
-				print '<h2>_POST</h2>';
+				print '<h2>$_POST</h2>';
 				var_dump($_POST);
-				print '<h2>_FILES</h2>';
+				print '<h2>$_FILES</h2>';
 				var_dump($_FILES);
 				print '</pre><hr>';
-*/
-//				print '<h2>About to upload files</h2>';
+				print '<h2>About to upload files</h2>';
 
 				// Want the response file upload to be independent of grades/comments
 				// This way files can be uploaded, then a .CSV of the grades uploaded separately.
@@ -773,10 +771,10 @@ class assignment_base {
 					$id = substr( $id, 3 );
 					// $id now looks like 4
                     $id = (int)$id; //clean parameter name for user's id #
-
-                    // $this->process_outcomes($id); // ignoring outcomes b/c I only want file uploads
-
-                    if (!$submission = $this->get_submission($id, true)) {
+					
+                    if (!$submission = $this->get_submission($id, true, true)) {
+						// create if missing, created by teacher, not student
+						
                         // TODO: How to signal failure to create a submission record?
 						continue;
                     }
@@ -796,11 +794,11 @@ class assignment_base {
 
                     $submission->timemarked = time();
 
-					// print '<pre>';
-					// print '<h3>submission object:</h3>' ;
-					// var_dump( $submission );
-					// print '</pre><hr>';
-					// exit(0);
+					print '<h3>submission object:</h3>' ;
+					print '<pre>';
+					var_dump( $submission );
+					print '</pre><hr>';
+					exit(0);
 
 					
 					// Create stored_file from string
@@ -1244,50 +1242,58 @@ class assignment_base {
      */
 	private function get_response_file_box($final_grade, $auser, $quickgrade, &$tabindex)
 	{
-		$no_files_default = '(No file to display)';
+		$no_files_default = '<i>(No previous files to display)</i>';
+		$no_files_default_2 = '<b>(No previous files to display)</b>';
+
+		// a <br/> separated listed of previously uploaded files, or
+		// else a message saying that there are no previously uploaded files:
+		$response_file_names = "";	
+		
 		// If there's been no submission then there's no response files...
-//		print '<h2>$auser->submissionid:'.$auser->submissionid.'</h2>';
-
 		if( empty($auser->submissionid))
-			return '<div id="resp'.$auser->id.'">' . $no_files_default . '</div>';
-			
-		
-		$fs = get_file_storage();
+			$response_file_names = $no_files_default;
+		else {
+			// Check for previous response files: 
+			$fs = get_file_storage();
 
-		// Find previous files (if any)
-		$response_files = $fs->get_area_files( $this->context->id, 'mod_assignment','response' );
-		$response_file_names = "";
-		// print '<pre>';
-		// print '<h2>$response_files:</h2>';
-		// var_dump( $response_files );
-		// print '</pre>';
+			// Find previous files (if any)
+			$response_files = $fs->get_area_files( $this->context->id, 'mod_assignment','response', $auser->submissionid  );
+
+			// print '<pre>';
+			// print '<h2>$response_files:</h2>';
+			// var_dump( $response_files );
+			// print '</pre>';
+					
+			$num_found = 0;
+			foreach( $response_files as $pathnamehash => $stored_file)
+			{
+				// print '<h2>$stored_file->get_itemid: ' . $stored_file->get_itemid() . ' $auser->submissionid: ' . $auser->submissionid .' isDirectory:'.$stored_file->is_directory().'</h2>';
+			
+				if( $stored_file->is_directory()) {
+					continue;
+				}
+				if( $stored_file->get_itemid() != $auser->submissionid ) {
+					print '<h1>ERROR ERROR - got file for wrong submission!!!</h1>';
+					continue;
+				}
 				
-		$num_found = 0;
-		foreach( $response_files as $pathnamehash => $stored_file)
-		{
-			// print '<h2>$stored_file->get_itemid: ' . $stored_file->get_itemid() . ' $auser->submissionid: ' . $auser->submissionid .' isDirectory:'.$stored_file->is_directory().'</h2>';
-		
-			if( $stored_file->get_itemid() != $auser->submissionid 
-				|| $stored_file->is_directory()) {
-				continue;
+				$response_file_names  .= $stored_file->get_filename() . '<br/>';
+				$num_found++;
+				
+				// print '<pre>';
+				// print '$response_file_names: ' . $response_file_names;
+				// print '<br/>$pathnamehash: ' . $pathnamehash . '<br/>$stored_file->get_filename():'.$stored_file->get_filename() .'<br/>$stored_file:<br/>';
+				// print '<br/></pre>';
 			}
 			
-			$response_file_names  .= $stored_file->get_filename() . '<br/>';
-			$num_found++;
-			
-			// print '<pre>';
-			// print '$response_file_names: ' . $response_file_names;
-			// print '<br/>$pathnamehash: ' . $pathnamehash . '<br/>$stored_file->get_filename():'.$stored_file->get_filename() .'<br/>$stored_file:<br/>';
-			// print '<br/></pre>';
-		}
-		
-		if( $response_file_names != "")
-			if( $num_found > 1 )
-				$response_file_names = 'Current files:<br/>' . $response_file_names;
+			if( $response_file_names != "")
+				if( $num_found > 1 )
+					$response_file_names = 'Current files:<br/>' . $response_file_names;
+				else
+					$response_file_names = 'Current file:<br/>' . $response_file_names;
 			else
-				$response_file_names = 'Current file:<br/>' . $response_file_names;
-		else
-			$response_file_names = $no_files_default . '<br/>';
+				$response_file_names = $no_files_default_2;
+		}
 		
 		$filechooser = html_writer::tag('input', '', 
 			array('type'=>'file', 'name'=>'rf_'.$auser->id.'', 'id' => 'rf'.$auser->id, 'tabindex' => $tabindex++) );
