@@ -794,11 +794,11 @@ class assignment_base {
 
                     $submission->timemarked = time();
 
-					print '<h3>submission object:</h3>' ;
-					print '<pre>';
-					var_dump( $submission );
-					print '</pre><hr>';
-					exit(0);
+					// print '<h3>submission object:</h3>' ;
+					// print '<pre>';
+					// var_dump( $submission );
+					// print '</pre><hr>';
+//					exit(0);
 
 					
 					// Create stored_file from string
@@ -840,15 +840,15 @@ class assignment_base {
 //					}
 						
 
-					// print '<pre>';
-					// print '<br/>$id: ' . $id . '<br/>$submission:';
-					// var_dump($submission);
-					// print '$fileinfo: <br/>';
-					// var_dump( $fileinfo );
-					// print '$newFileInfo: <br/>';
-					// var_dump( $newFileInfo );
-					// print '</pre><hr>';
-					// continue;
+					print '<pre>';
+					print '<br/>$id: ' . $id . '<br/>$submission:';
+					var_dump($submission);
+					print '$fileinfo: <br/>';
+					var_dump( $fileinfo );
+					print '$newFileInfo: <br/>';
+					var_dump( $newFileInfo );
+					print '</pre><hr>';
+//					continue;
 					
 					// No need to explicitly attach stored_file to submission - we'll find it when we look for any files for the submission
 					
@@ -1273,11 +1273,18 @@ class assignment_base {
 					continue;
 				}
 				if( $stored_file->get_itemid() != $auser->submissionid ) {
-					print '<h1>ERROR ERROR - got file for wrong submission!!!</h1>';
+//					print '<h1>INTERAL WEIRDNESS - got file for wrong submission!!!</h1>';
 					continue;
 				}
+
+				// the following is stolen from http://docs.moodle.org/dev/Using_the_file_API#List_area_files :)
+				global $CFG;
 				
-				$response_file_names  .= $stored_file->get_filename() . '<br/>';
+				$url = $CFG->wwwroot."/pluginfile.php/{$stored_file->get_contextid()}/mod_assignment/response";
+				$filename = $stored_file->get_filename();
+				$fileurl = $url.$stored_file->get_filepath().$stored_file->get_itemid().'/'.$filename;
+				
+				$response_file_names  .=  html_writer::link($fileurl, $filename) .'<br/>';
 				$num_found++;
 				
 				// print '<pre>';
@@ -1433,6 +1440,7 @@ class assignment_base {
             $formattrs['action'] = new moodle_url('/mod/assignment/submissions.php');
             $formattrs['id'] = 'fastg';
             $formattrs['method'] = 'post';
+			$formattrs['enctype'] = 'multipart/form-data';
 
             echo html_writer::start_tag('form', $formattrs);
             echo html_writer::empty_tag('input', array('type'=>'hidden', 'name'=>'id',      'value'=> $this->cm->id));
