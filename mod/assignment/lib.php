@@ -289,7 +289,8 @@ class assignment_base {
             return;
         }
 
-        if ($grade->grade === null and empty($grade->str_feedback)) {   /// Nothing to show yet
+        $responsefiles=$this->count_responsefiles($USER->id);
+        if ($grade->grade === null and empty($grade->str_feedback) and $responsefiles == 0) {   /// Nothing to show yet            
             return;
         }
 
@@ -587,6 +588,84 @@ class assignment_base {
         assignment_update_grades($this->assignment, $submission->userid);
     }
 
+	/**
+	  * Stores a response file for a student's assignment submission.
+	  * Note that this will create a submission object if it doesn't exist already, so that
+	  * teachers can send response files to students who never submitted any work.
+	  *
+	  * No need to explicitly attach stored_file to submission - we'll find it when we look for any files for the submission
+	  *
+      * @global object DB
+      * @global object USER
+      * @param int $id The id number of the user's submission
+	  * @param object $file_data Data about the file from the $_FILES array
+	  * @param bool $doUpdate true if update logic should be run, otherwise false
+      * @return string blank on success, otherwise an error message to display 
+	  */
+	function process_quickgrade_response_file($id, $file_data, $doUpdate)	{
+		global $DB, $OUTPUT, $USER;
+
+		// $file_data['error'] must not be UPLOAD_ERR_NO_FILE - that is checked elsewhere...
+		
+		if( $file_data['error'] != UPLOAD_ERR_OK ) {
+			return $OUTPUT->notification(get_string('fileuploaderror', 'assignment', $file_data['name']), 'notifyproblem');
+		}
+		
+		if( ! is_uploaded_file( $file_data['tmp_name']  ) ) {
+			return $OUTPUT->notification(get_string('filenotuploaded', 'assignment', $file_data['name']), 'notifyproblem');
+		}
+		
+		if (!$submission = $this->get_submission($id, true, true)) {
+			return $OUTPUT->notification(get_string('nosubmissionobject', 'assignment'), 'notifyproblem');
+		}
+
+		unset($submission->data1);  // Don't need to update this.
+		unset($submission->data2);  // Don't need to update this.
+
+		$submission->teacher    = $USER->id;
+		
+		$mailinfo = optional_param('mailinfo', null, PARAM_BOOL);
+		$submission->mailed = (int)(!$mailinfo);
+		$submission->timemarked = time();
+	
+		// Create stored_file from string
+		// This is (mostly) from http://docs.moodle.org/dev/Using_the_file_API#Create_file
+		$fs = get_file_storage();
+
+		// Prepare file record object
+		$fileinfo = array(
+			'contextid' => $this->context->id, 	// ID of context
+			'component' => 'mod_assignment',    // usually = table name
+			'filearea' => 'response',     		// usually = table name
+			'itemid' => $submission->id,        // ID of submission 
+			'filepath' => '/',           		// 
+			'filename' => $file_data['name'] ); 			
+		
+		$newFileInfo = $fs->get_file( $fileinfo['contextid'], 
+							 $fileinfo['component'],
+							 $fileinfo['filearea'],
+							 $fileinfo['itemid'], 
+							 $fileinfo['filepath'], 
+							 $fileinfo['filename'] );
+	
+		if( $newFileInfo == false ) {
+			// File does not yet exist - create file
+			
+			$newFileInfo = $fs->create_file_from_string($fileinfo, 
+									file_get_contents($file_data['tmp_name']));
+		}
+		
+		if( $doUpdate == true ) {
+			// If this is an update, so we'll do the update logic here:
+			$DB->update_record('assignment_submissions', $submission);
+			$this->update_grade($submission);
+			add_to_log($this->course->id, 'assignment', 'update grades',
+					   'submissions.php?id='.$this->cm->id.'&user='.$submission->userid,
+					   $submission->userid, $this->cm->id); 	
+		}
+		return ''; // no errors to report
+	}
+	
     /**
      * Top-level function for handling of submissions called by submissions.php
      *
@@ -647,6 +726,18 @@ class assignment_base {
 
             case 'fastgrade':
                 ///do the fast grading stuff  - this process should work for all 3 subclasses
+				
+				// print '<pre>';
+				// print '<h2>$_POST[submissioncomment]</h2>';
+				// var_dump($_POST['submissioncomment']);
+				// print '<h2>$_POST</h2>';
+				// var_dump($_POST);
+				// print '<h2>$_FILES</h2>';
+				// var_dump($_FILES);
+				// print '</pre><hr>';
+				// print '<h2>About to upload files</h2>';
+
+				$message = '';
                 $grading    = false;
                 $commenting = false;
                 $col        = false;
@@ -665,7 +756,6 @@ class assignment_base {
                 }
 
                 foreach ($_POST[$col] as $id => $unusedvalue){
-
                     $id = (int)$id; //clean parameter name
 
                     $this->process_outcomes($id);
@@ -706,15 +796,15 @@ class assignment_base {
 
                     $submission->timemarked = time();
 
-                    //if it is not an update, we don't change the last modified time etc.
-                    //this will also not write into database if no submissioncomment and grade is entered.
-/*					print '<pre>';
-					print '$_POST[$col]<br/>';
-					var_dump( $_POST[$col] );
-					print '$updatedb: '. $updatedb . ' $id: ' . $id . '$submission:';
-					var_dump($submission);
-					print '</pre><hr>'; */
-
+					// If there is a quickgrade response file for this then process it
+					$rf_key = 'rf_'.$id;
+					if( array_key_exists( $rf_key , $_FILES )
+						&& $_FILES[$rf_key ]['error'] != UPLOAD_ERR_NO_FILE ) {
+						
+						$message .= $this->process_quickgrade_response_file($id, $_FILES[$rf_key ], false);
+						unset( $_FILES[$rf_key ] ); // avoid re-processing this after the 'grades & comments' loop
+					}
+					
                     if ($updatedb){
                         if ($newsubmission) {
                             if (!isset($submission->submissioncomment)) {
@@ -736,149 +826,28 @@ class assignment_base {
                    }
 
                 }
-
 				
-				print '<pre>';
-				print '<h2>$col</h2>';
-				var_dump($col);
-				var_dump($_POST[$col]);
-				print '<h2>$_POST[submissioncomment]</h2>';
-				var_dump($_POST['submissioncomment']);
-				print '<h2>$_POST</h2>';
-				var_dump($_POST);
-				print '<h2>$_FILES</h2>';
-				var_dump($_FILES);
-				print '</pre><hr>';
-				print '<h2>About to upload files</h2>';
-
 				// Want the response file upload to be independent of grades/comments
 				// This way files can be uploaded, then a .CSV of the grades uploaded separately.
-                foreach ($_FILES as $id => $file_data){
-
-					// TODO: Change FILE names to automatically indexed array, as per http://www.php.net/manual/en/features.file-upload.multiple.php ?
+                // foreach ($_FILES as $id => $file_data){
 				
-					if( $file_data['error'] != UPLOAD_ERR_OK )
-						continue; // TODO: How to report errors?
-						
-					
-					if( ! is_uploaded_file( $file_data['tmp_name']  ) )
-					{
-						// TODO: How to signal an error?
-						continue;
-					}
-
-					// $id now looks like rf_4
-					$id = substr( $id, 3 );
-					// $id now looks like 4
-                    $id = (int)$id; //clean parameter name for user's id #
-					
-                    if (!$submission = $this->get_submission($id, true, true)) {
-						// create if missing, created by teacher, not student
-						
-                        // TODO: How to signal failure to create a submission record?
-						continue;
-                    }
-                    unset($submission->data1);  // Don't need to update this.
-                    unset($submission->data2);  // Don't need to update this.
-
-                    // just do the change, for now
-                    $updatedb = true; 
-					// TODO: later we'll figure out how to update an existing file
-					//		Create stored_file from string, look for another file with
-					//		the same SHA1 hash in the filedir?
-
-                    $submission->teacher    = $USER->id;
-                    if ($updatedb) {
-                        $submission->mailed = (int)(!$mailinfo);
-                    }
-
-                    $submission->timemarked = time();
-
-					// print '<h3>submission object:</h3>' ;
-					// print '<pre>';
-					// var_dump( $submission );
-					// print '</pre><hr>';
-//					exit(0);
-
-					
-					// Create stored_file from string
-					// This is (mostly) from http://docs.moodle.org/dev/Using_the_file_API#Create_file
-					$fs = get_file_storage();
- 
-					// Prepare file record object
-					$fileinfo = array(
-						'contextid' => $this->context->id, 	// ID of context
-						'component' => 'mod_assignment',    // usually = table name
-						'filearea' => 'response',     		// usually = table name
-						'itemid' => $submission->id,        // ID of submission TODO: or $submission->id?
-						'filepath' => '/',           		// TODO: Put elsewhere?
-						'filename' => $file_data['name'] ); 			
-					
-					$newFileInfo = $fs->get_file( $fileinfo['contextid'], 
-										 $fileinfo['component'],
-										 $fileinfo['filearea'],
-										 $fileinfo['itemid'], 
-										 $fileinfo['filepath'], 
-										 $fileinfo['filename'] );
-										
-					if( $newFileInfo == false )
-					{
-						// File does not yet exist - create file
-						$file_contents = file_get_contents($file_data['tmp_name']);
-						
-						$newFileInfo = $fs->create_file_from_string($fileinfo, $file_contents);
-
-//						print '<pre>';
-//						print '<h3>creating new file</h3>file upload: ' . $file_data['tmp_name'] ;
-//						print '<br/>contents: ' . $file_contents;
-//						print '</pre><hr>';
-					}
-//					else
-//					{
-//						// The file already exists
-//						print '<h3>Uploaded file '. $fileinfo['filename'] .'already exists!</h3>';
-//					}
-						
-
-					print '<pre>';
-					print '<br/>$id: ' . $id . '<br/>$submission:';
-					var_dump($submission);
-					print '$fileinfo: <br/>';
-					var_dump( $fileinfo );
-					print '$newFileInfo: <br/>';
-					var_dump( $newFileInfo );
-					print '</pre><hr>';
-//					continue;
-					
-					// No need to explicitly attach stored_file to submission - we'll find it when we look for any files for the submission
-					
-                    //if it is not an update, we don't change the last modified time etc.
-                    //this will also not write into database if no submissioncomment and grade is entered. TODO: Why not???
-
-                    if ($updatedb){
-/*                        if ($newsubmission) {
-                            if (!isset($submission->submissioncomment)) {
-                                $submission->submissioncomment = '';
-                            }
-                            $sid = $DB->insert_record('assignment_submissions', $submission);
-                            $submission->id = $sid;
-                        } else { */
-                            $DB->update_record('assignment_submissions', $submission);
-                        /*}*/
-
-                        // trigger grade event
-                        $this->update_grade($submission);
-
-                        //add to log only if updating
-                        add_to_log($this->course->id, 'assignment', 'update grades',
-                                   'submissions.php?id='.$this->cm->id.'&user='.$submission->userid,
-                                   $submission->userid, $this->cm->id); 
-                    }
-
-                }				
+					// print "<h2>Post processing file ".$id ."</h2>";
 				
+					// if( $file_data['error'] == UPLOAD_ERR_NO_FILE )
+						// continue;
+
+					// // $id now looks like rf_4
+					// $id = substr( $id, 3 );
+					// // $id now looks like 4
+                    // $id = (int)$id; //clean parameter name for user's id #
+
+					// $message .= $this->process_quickgrade_response_file($id, $file_data, true);
+                // }				
 				
-                $message = $OUTPUT->notification(get_string('changessaved'), 'notifysuccess');
+				if( $message == '') 
+					$message = $OUTPUT->notification(get_string('changessaved'), 'notifysuccess');
+				else
+					$message .= $OUTPUT->notification(get_string('feedbackmostlyupdated', 'assignment'), 'notifysuccess');
 
                 $this->display_submissions($message);
                 break;
@@ -1302,40 +1271,15 @@ class assignment_base {
 				$response_file_names = $no_files_default_2;
 		}
 		
+		// We're not using the name="rf[3]" format here b/c PHP stores the result as
+		// $_FILES["rf"]["name"][3]
+		// it would be much better/intuitive to store it as $_FILES["rf"][3]["name"]
 		$filechooser = html_writer::tag('input', '', 
-			array('type'=>'file', 'name'=>'rf_'.$auser->id.'', 'id' => 'rf'.$auser->id, 'tabindex' => $tabindex++) );
+			array('type'=>'file', 'name'=>'rf_'.$auser->id, 'id' => 'rf'.$auser->id, 'tabindex' => $tabindex++) );
 		$responsefile = '<div id="resp'.$auser->id.'">'.$response_file_names.'<br/>Add Response File:'.$filechooser.'</div>';			
 		
 		return $responsefile;
 	}
-		// if ($final_grade->locked or $final_grade->overridden) {
-			// if (empty($auser->submissionid)) {
-                            // $responsefile = '<div id="resp'.$auser->id.'">(No file to display)</div>';
-            // }
-			// else {
-				// $fs = get_file_storage();
-
-//				Find previous files (if any)
-				// $response_files = $fs->get_area_files( $this->context->id, 'mod_assignment','response' );
-				// $response_file_names = "";
-				// foreach( $response_files as $pathnamehash => $stored_file)
-				// {
-					// $response_file_names  += $stored_file->get_filename() . '<br/>';
-				// }
-				
-				// if( $response_file_names == "")
-					// $response_file_names = '(No file to display)';
-				
-				// $responsefile = '<div id="resp'.$auser->id.'">Current file:<br/>'.$response_file_names.'</div>';
-			// }
-		// } else if ($quickgrade) {
-//			'name' attribute is rf_X, where X == user's id, since
-			// $filechooser = html_writer::tag('input', '', 
-				// array('type'=>'file', 'name'=>'rf_'.$auser->id.'', 'id' => 'rf'.$auser->id, 'tabindex' => $tabindex++) );
-			// $responsefile = '<div id="resp'.$auser->id.'">'.$filechooser.'</div>';			
-		// } else {
-			// $responsefile = '<div id="resp'.$auser->id.'">(No file to display)</div>';
-		// }	
 	
     /**
      *  Display all the submissions ready for grading

@@ -126,7 +126,8 @@ class assignment_upload extends assignment_base {
             return;
         }
 
-        if ($grade->grade === null and empty($grade->str_feedback)) {   /// Nothing to show yet
+        $responsefiles=$this->count_responsefiles($USER->id);
+        if ($grade->grade === null and empty($grade->str_feedback) and $responsefiles == 0) {   /// Nothing to show yet            
             return;
         }
 
