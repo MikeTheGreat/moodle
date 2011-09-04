@@ -727,16 +727,6 @@ class assignment_base {
             case 'fastgrade':
                 ///do the fast grading stuff  - this process should work for all 3 subclasses
 				
-				// print '<pre>';
-				// print '<h2>$_POST[submissioncomment]</h2>';
-				// var_dump($_POST['submissioncomment']);
-				// print '<h2>$_POST</h2>';
-				// var_dump($_POST);
-				// print '<h2>$_FILES</h2>';
-				// var_dump($_FILES);
-				// print '</pre><hr>';
-				// print '<h2>About to upload files</h2>';
-
 				$message = '';
                 $grading    = false;
                 $commenting = false;
@@ -825,24 +815,7 @@ class assignment_base {
                                    $submission->userid, $this->cm->id); 
                    }
 
-                }
-				
-				// Want the response file upload to be independent of grades/comments
-				// This way files can be uploaded, then a .CSV of the grades uploaded separately.
-                // foreach ($_FILES as $id => $file_data){
-				
-					// print "<h2>Post processing file ".$id ."</h2>";
-				
-					// if( $file_data['error'] == UPLOAD_ERR_NO_FILE )
-						// continue;
-
-					// // $id now looks like rf_4
-					// $id = substr( $id, 3 );
-					// // $id now looks like 4
-                    // $id = (int)$id; //clean parameter name for user's id #
-
-					// $message .= $this->process_quickgrade_response_file($id, $file_data, true);
-                // }				
+                }				
 				
 				if( $message == '') 
 					$message = $OUTPUT->notification(get_string('changessaved'), 'notifysuccess');
@@ -1212,7 +1185,6 @@ class assignment_base {
 	private function get_response_file_box($final_grade, $auser, $quickgrade, &$tabindex)
 	{
 		$no_files_default = '<i>(No previous files to display)</i>';
-		$no_files_default_2 = '<b>(No previous files to display)</b>';
 
 		// a <br/> separated listed of previously uploaded files, or
 		// else a message saying that there are no previously uploaded files:
@@ -1228,11 +1200,6 @@ class assignment_base {
 			// Find previous files (if any)
 			$response_files = $fs->get_area_files( $this->context->id, 'mod_assignment','response', $auser->submissionid  );
 
-			// print '<pre>';
-			// print '<h2>$response_files:</h2>';
-			// var_dump( $response_files );
-			// print '</pre>';
-					
 			$num_found = 0;
 			foreach( $response_files as $pathnamehash => $stored_file)
 			{
@@ -1268,7 +1235,7 @@ class assignment_base {
 				else
 					$response_file_names = 'Current file:<br/>' . $response_file_names;
 			else
-				$response_file_names = $no_files_default_2;
+				$response_file_names = $no_files_default;
 		}
 		
 		// We're not using the name="rf[3]" format here b/c PHP stores the result as
@@ -1482,7 +1449,7 @@ class assignment_base {
         $table->column_class('grade', 'grade');
         $table->column_class('submissioncomment', 'comment');
 		if( $quickgrade && $quickgrade_response_files ) {
-			$table->column_class('responsefile', 'responsefile'); // HACK HACK!
+			$table->column_class('responsefile', 'responsefile');
 		}
         $table->column_class('timemodified', 'timemodified');
         $table->column_class('timemarked', 'timemarked');
