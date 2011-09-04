@@ -599,10 +599,9 @@ class assignment_base {
       * @global object USER
       * @param int $id The id number of the user's submission
 	  * @param object $file_data Data about the file from the $_FILES array
-	  * @param bool $doUpdate true if update logic should be run, otherwise false
       * @return string blank on success, otherwise an error message to display 
 	  */
-	function process_quickgrade_response_file($id, $file_data, $doUpdate)	{
+	function process_quickgrade_response_file($id, $file_data)	{
 		global $DB, $OUTPUT, $USER;
 
 		// $file_data['error'] must not be UPLOAD_ERR_NO_FILE - that is checked elsewhere...
@@ -655,14 +654,6 @@ class assignment_base {
 									file_get_contents($file_data['tmp_name']));
 		}
 		
-		if( $doUpdate == true ) {
-			// If this is an update, so we'll do the update logic here:
-			$DB->update_record('assignment_submissions', $submission);
-			$this->update_grade($submission);
-			add_to_log($this->course->id, 'assignment', 'update grades',
-					   'submissions.php?id='.$this->cm->id.'&user='.$submission->userid,
-					   $submission->userid, $this->cm->id); 	
-		}
 		return ''; // no errors to report
 	}
 	
@@ -731,21 +722,40 @@ class assignment_base {
                 $grading    = false;
                 $commenting = false;
                 $col        = false;
+				$iterateOver= NULL;
+				
                 if (isset($_POST['submissioncomment'])) {
                     $col = 'submissioncomment';
                     $commenting = true;
+					$iterateOver = $_POST['submissioncomment'];
                 }
+
                 if (isset($_POST['menu'])) {
                     $col = 'menu';
                     $grading = true;
-                }
-                if (!$col) {
-                    //both submissioncomment and grade columns collapsed..
-                    $this->display_submissions();
-                    break;
+					$iterateOver = $_POST['menu'];
                 }
 
-                foreach ($_POST[$col] as $id => $unusedvalue){
+				if( !$col ) {
+					if( !empty( $_FILES ) ) {
+						$iterateOver = $_FILES;
+						$col = 'files';
+					}				
+					else {
+						//submissioncomment, grade, response file columns collapsed...
+						$this->display_submissions();
+						break;
+					}
+                }
+
+                foreach ($iterateOver as $id => $unusedvalue){
+					if( $col == 'files' ) {
+						// $id looks like rf_4
+						
+						$id = substr( $id, 3 );						
+						// $id now looks like 4		
+					}
+				
                     $id = (int)$id; //clean parameter name
 
                     $this->process_outcomes($id);
@@ -791,7 +801,7 @@ class assignment_base {
 					if( array_key_exists( $rf_key , $_FILES )
 						&& $_FILES[$rf_key ]['error'] != UPLOAD_ERR_NO_FILE ) {
 						
-						$message .= $this->process_quickgrade_response_file($id, $_FILES[$rf_key ], false);
+						$message .= $this->process_quickgrade_response_file($id, $_FILES[$rf_key ]);
 						unset( $_FILES[$rf_key ] ); // avoid re-processing this after the 'grades & comments' loop
 					}
 					
