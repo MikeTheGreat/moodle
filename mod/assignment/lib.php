@@ -1230,7 +1230,7 @@ class assignment_base {
 				$filename = $stored_file->get_filename();
 				$fileurl = $url.$stored_file->get_filepath().$stored_file->get_itemid().'/'.$filename;
 				
-				$response_file_names  .=  html_writer::link($fileurl, $filename) .'<br/>';
+				$response_file_names  .=  html_writer::link($fileurl, clean_filename($filename) ) .'<br/>';
 				$num_found++;
 				
 				// print '<pre>';
