@@ -1115,7 +1115,7 @@ class assignment_upload extends assignment_base {
                     //get files new name.
                     $fileext = strstr($file->get_filename(), '.');
                     $fileoriginal = str_replace($fileext, '', $file->get_filename());
-                    $fileforzipname =  clean_filename(fullname($a_user) . "_" . $fileoriginal."_".$a_userid.$fileext);
+                    $fileforzipname =  clean_filename($a_user->lastname.' '. $a_user->firstname ) . "/" . clean_filename($fileoriginal . $fileext);
                     //save file name to array for zipping.
                     $filesforzipping[$fileforzipname] = $file;
                 }
