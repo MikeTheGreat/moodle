@@ -1087,8 +1087,41 @@ class assignment_upload extends assignment_base {
      * creates a zip of all assignment submissions and sends a zip to the browser
      */
     public function download_submissions() {
-        global $CFG,$DB;
+        global $CFG,$DB, $USER;
         require_once($CFG->libdir.'/filelib.php');
+
+		define( 'ZIP_FILTER_KEY', 'zipfilter');
+		define( 'ZIP_FILTER_KEY_NONE', 'none' );
+		define( 'ZIP_FILTER_SINCE_LAST_DOWNLOAD', 'sincelastdownload');
+		
+		$zip_filter = optional_param( ZIP_FILTER_KEY, ZIP_FILTER_KEY_NONE, PARAM_ALPHA);
+		// We'll use this next one to update the last downloaded time regardless
+
+		$dbman = $DB->get_manager();
+		if( !$dbman->table_exists('assignmentsubmissionslastdownloaded') ) {
+			print_error( 'In order for this feature to work you must manually add a table named "assignmentsubmissionslastdownloaded" to the moodle table<br/> In order for this feature to work you must manually add a table named "assignmentsubmissionslastdownloaded" to the moodle table (typically tables are actually named something like mdl_assignmentsubmissionslastdownloaded, if you went with the default installation options).<br/>Within it create<ul><li>a column named <b>id</b> exactly, as a BIGINT that auto-increments</li><li>a column named <b>assignment_id</b> exactly, as a BIGINT</li><li>a column named <b>user_id</b> exactly, as a BIGINT</li><li>a column named <b>submissionslastdownloaded</b> exactly, as a BIGINT (with a default value of 0)</li></ul><br/>Here\s
+			some SQL that should work for MySQL: <pre>
+CREATE TABLE `mdl_assignmentsubmissionslastdownloaded` (
+`id` bigint(20) NOT NULL AUTO_INCREMENT,
+`assignment_id` bigint(20) NOT NULL,
+`user_id` bigint(20) NOT NULL,
+`submissionslastdownloaded` bigint(20) NOT NULL DEFAULT \'0\',
+PRIMARY KEY (`id`),
+UNIQUE KEY `a_u` (`assignment_id`,`user_id`)
+) ENGINE=InnoDB  DEFAULT CHARSET=utf8 AUTO_INCREMENT=5 ;
+</pre><br/><br/>Sorry, but this "incremental download" feature won\'t be able to work until that is done');
+			exit(0);
+		}
+		
+		$zip_filter_conditions = array( 'assignment_id' => $this->assignment->id,'user_id' => $USER->id );
+		// If we're not in 'filter' mode (or we are but there's no prior downloads) then download all submissions
+		$last_downloaded = 0;
+		// We need to know (for later update) if there's a current record or not, so always get it here:
+		$previous_submission_download =  $DB->get_record('assignmentsubmissionslastdownloaded', $zip_filter_conditions);
+		if( 	$previous_submission_download != false
+			&& 	$zip_filter == ZIP_FILTER_SINCE_LAST_DOWNLOAD )
+			$last_downloaded = $previous_submission_download->submissionslastdownloaded;
+			
         $submissions = $this->get_submissions('','');
         if (empty($submissions)) {
             print_error('errornosubmissions', 'assignment');
@@ -1110,6 +1143,9 @@ class assignment_upload extends assignment_base {
                 $a_assignid = $submission->assignment; //get name of this assignment for use in the file names.
                 $a_user = $DB->get_record("user", array("id"=>$a_userid),'id,username,firstname,lastname'); //get user firstname/lastname
 
+				if( (int)$submission->timemodified <= $last_downloaded)
+						continue;
+				
                 $files = $fs->get_area_files($this->context->id, 'mod_assignment', 'submission', $submission->id, "timemodified", false);
                 foreach ($files as $file) {
                     //get files new name.
@@ -1118,10 +1154,26 @@ class assignment_upload extends assignment_base {
                     $fileforzipname =  clean_filename(fullname($a_user) . "_" . $fileoriginal."_".$a_userid.$fileext);
                     //save file name to array for zipping.
                     $filesforzipping[$fileforzipname] = $file;
-                }
+				}
             }
         } // end of foreach loop
-        if ($zipfile = assignment_pack_files($filesforzipping)) {
+
+		// Always remember the most recent download, even if it wasn't filtered
+		if( $previous_submission_download != false ) {
+			$DB->set_field('assignmentsubmissionslastdownloaded', 'submissionslastdownloaded', (int)time(), $zip_filter_conditions);
+		} else {
+			// this is the first time we've seen this user/assignment combo - add a new record
+			$record 							= new stdClass();
+			$record->assignment_id				= $zip_filter_conditions['assignment_id'];
+			$record->user_id 					= $zip_filter_conditions['user_id'];
+			$record->submissionslastdownloaded	= time();
+			$res = $DB->insert_record('assignmentsubmissionslastdownloaded', $record, false);
+		}
+
+		if( empty( $filesforzipping ) ) {
+			print_error("There are no (new) student submissions to download!");
+		}
+		else if ($zipfile = assignment_pack_files($filesforzipping)) {
             send_temp_file($zipfile, $filename); //send file and delete after sending.
         }
     }
